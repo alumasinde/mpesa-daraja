@@ -7,13 +7,13 @@ C2B URL registration, and callback parsing. Standard library only.
 
 ```bash
 # 1. replace YOUR_USER in go.mod and in the import path below
-go mod edit -module github.com/<you>/mpesa
+go mod edit -module github.com/alumasinde/mpesa-daraja
 git init && git add . && git commit -m "mpesa v0.1.0"
-git remote add origin git@github.com:<you>/mpesa.git
+git remote add origin git@github.com:<you>/mpesa-daraja.git
 git tag v0.1.0 && git push origin main v0.1.0
 
 # in a consuming project
-go get github.com/<you>/mpesa@v0.1.0
+go get github.com/alumasinde/mpesa-daraja@v0.1.0
 ```
 
 Private repo: `go env -w GOPRIVATE=github.com/<you>/*` and use SSH or a token.
