@@ -1,0 +1,7 @@
+{
+  "name": "albatech/mpesa-daraja-php",
+  "description": "Small dependency-free Daraja client for PHP 8 with a ready payment UI",
+  "type": "library",
+  "require": { "php": ">=8.1", "ext-curl": "*", "ext-openssl": "*", "ext-json": "*", "ext-pdo": "*" },
+  "autoload": { "files": ["src/Support.php", "src/Client.php"] }
+}
