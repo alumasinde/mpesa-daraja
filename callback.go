@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,20 +15,20 @@ import (
 
 // STKCallback is the parsed result of an STK push, delivered to your
 // CallbackURL. On failure/cancel only the identifiers, ResultCode and
-// ResultDesc are set.
+// ResultDesc are set. Amounts are whole KES (M-Pesa never sends cents).
 type STKCallback struct {
 	MerchantRequestID  string
 	CheckoutRequestID  string
 	ResultCode         int
 	ResultDesc         string
-	Amount             float64
+	Amount             int64
 	MpesaReceiptNumber string
 	TransactionDate    time.Time
 	PhoneNumber        string
 }
 
-// Success reports whether the customer paid.
-func (cb *STKCallback) Success() bool { return cb.ResultCode == 0 }
+// Success reports whether the customer paid (ResultCode 0).
+func (cb *STKCallback) Success() bool { return cb.ResultCode == ResultSuccess }
 
 type rawSTKCallback struct {
 	Body struct {
@@ -58,10 +59,10 @@ func ParseSTKCallback(r io.Reader) (*STKCallback, error) {
 	}
 
 	cb := &STKCallback{
-		MerchantRequestID: s.MerchantRequestID,
-		CheckoutRequestID: s.CheckoutRequestID,
-		ResultCode:        s.ResultCode,
-		ResultDesc:        s.ResultDesc,
+		MerchantRequestID:  s.MerchantRequestID,
+		CheckoutRequestID:  s.CheckoutRequestID,
+		ResultCode:         s.ResultCode,
+		ResultDesc:         s.ResultDesc,
 	}
 	if s.CallbackMetadata == nil {
 		return cb, nil
@@ -70,7 +71,10 @@ func ParseSTKCallback(r io.Reader) (*STKCallback, error) {
 		v := rawToString(it.Value)
 		switch it.Name {
 		case "Amount":
-			cb.Amount, _ = strconv.ParseFloat(v, 64)
+			// Daraja sends "1" or "1.00"; M-Pesa amounts are whole KES.
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				cb.Amount = int64(math.Round(f))
+			}
 		case "MpesaReceiptNumber":
 			cb.MpesaReceiptNumber = v
 		case "TransactionDate":

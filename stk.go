@@ -3,7 +3,7 @@ package mpesa
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strconv"
 )
 
 // TransactionType is the STK transaction type.
@@ -51,6 +51,13 @@ type stkPushBody struct {
 	TransactionDesc   string `json:"TransactionDesc"`
 }
 
+type stkQueryBody struct {
+	BusinessShortCode string `json:"BusinessShortCode"`
+	Password          string `json:"Password"`
+	Timestamp         string `json:"Timestamp"`
+	CheckoutRequestID string `json:"CheckoutRequestID"`
+}
+
 func (c *Client) requireSTKConfig() error {
 	if c.cfg.Shortcode == "" || c.cfg.Passkey == "" {
 		return errors.New("mpesa: Shortcode and Passkey are required for STK operations")
@@ -59,6 +66,10 @@ func (c *Client) requireSTKConfig() error {
 }
 
 // STKPush sends an M-Pesa payment prompt to the customer's phone.
+//
+// STKPush is never retried automatically (a repeated push could prompt the
+// customer twice). If Daraja acknowledges the request but rejects it, the
+// error is a *RequestError carrying the response codes and request IDs.
 func (c *Client) STKPush(ctx context.Context, r STKPushRequest) (*STKPushResponse, error) {
 	if err := c.requireSTKConfig(); err != nil {
 		return nil, err
@@ -108,11 +119,16 @@ func (c *Client) STKPush(ctx context.Context, r STKPushRequest) (*STKPushRespons
 	}
 
 	var resp STKPushResponse
-	if err := c.postJSON(ctx, "/mpesa/stkpush/v1/processrequest", body, &resp); err != nil {
+	if err := c.postJSON(ctx, "/mpesa/stkpush/v1/processrequest", body, &resp, false); err != nil {
 		return nil, err
 	}
 	if resp.ResponseCode != "0" {
-		return nil, fmt.Errorf("mpesa: stk push rejected: %s (%s)", resp.ResponseDescription, resp.ResponseCode)
+		return nil, &RequestError{
+			ResponseCode:        resp.ResponseCode,
+			ResponseDescription: resp.ResponseDescription,
+			MerchantRequestID:   resp.MerchantRequestID,
+			CheckoutRequestID:   resp.CheckoutRequestID,
+		}
 	}
 	return &resp, nil
 }
@@ -130,8 +146,21 @@ type STKQueryResponse struct {
 // Paid reports whether the customer completed the payment.
 func (q *STKQueryResponse) Paid() bool { return q.ResultCode == "0" }
 
+// ResultCodeInt is the numeric ResultCode, or -1 if Daraja did not send one
+// (e.g. while the transaction is still processing). Compare against the
+// Result* constants.
+func (q *STKQueryResponse) ResultCodeInt() int {
+	n, err := parseInt(q.ResultCode)
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
 // STKQuery checks the outcome of an STK push. While the customer is still
 // deciding Daraja returns an error; test it with IsProcessing and retry.
+// STKQuery is idempotent and is retried automatically on network errors,
+// 429s and 5xxs (see Config.MaxRetries).
 func (c *Client) STKQuery(ctx context.Context, checkoutRequestID string) (*STKQueryResponse, error) {
 	if err := c.requireSTKConfig(); err != nil {
 		return nil, err
@@ -140,15 +169,17 @@ func (c *Client) STKQuery(ctx context.Context, checkoutRequestID string) (*STKQu
 		return nil, errors.New("mpesa: checkoutRequestID is required")
 	}
 	ts := c.timestamp()
-	body := map[string]string{
-		"BusinessShortCode": c.cfg.Shortcode,
-		"Password":          c.password(ts),
-		"Timestamp":         ts,
-		"CheckoutRequestID": checkoutRequestID,
+	body := stkQueryBody{
+		BusinessShortCode: c.cfg.Shortcode,
+		Password:          c.password(ts),
+		Timestamp:         ts,
+		CheckoutRequestID: checkoutRequestID,
 	}
 	var resp STKQueryResponse
-	if err := c.postJSON(ctx, "/mpesa/stkpushquery/v1/query", body, &resp); err != nil {
+	if err := c.postJSON(ctx, "/mpesa/stkpushquery/v1/query", body, &resp, true); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
+
+func parseInt(s string) (int, error) { return strconv.Atoi(s) }
